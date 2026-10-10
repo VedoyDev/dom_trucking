@@ -1,6 +1,6 @@
 # dom_trucking — Manual
 
-Job de entrega de caixas: pegue o caminhão com um NPC, leve as caixas até uma loja sorteada e devolva o veículo para receber o pagamento.
+Job de entrega de caixas em equipe: monte uma equipe com o NPC, leve as caixas por uma sequência de lojas sorteadas e devolva o caminhão para todos receberem o pagamento.
 
 ---
 
@@ -10,8 +10,9 @@ Job de entrega de caixas: pegue o caminhão com um NPC, leve as caixas até uma 
 2. [Instalação](#instalação)
 3. [Configuração](#configuração)
 4. [Fluxo do job](#fluxo-do-job)
-5. [Entrypoints para outros recursos](#entrypoints-para-outros-recursos)
-6. [Estrutura de arquivos](#estrutura-de-arquivos)
+5. [Segurança](#segurança)
+6. [Idiomas](#idiomas)
+7. [Estrutura de arquivos](#estrutura-de-arquivos)
 
 ---
 
@@ -19,11 +20,12 @@ Job de entrega de caixas: pegue o caminhão com um NPC, leve as caixas até uma 
 
 | Recurso | Obrigatório | Observação |
 |---|---|---|
-| `ox_lib` | Sim | `lib.zones`, `lib.notify`, `lib.requestModel` |
-| `ox_target` | Sim | Alvos no NPC, no caminhão e no ponto de entrega |
-| `ox_inventory` | Sim | Entrega da recompensa via `AddItem` no servidor |
+| `ox_lib` | Sim | `lib.zones`, `lib.notify`, `lib.showTextUI`, `lib.callback` |
+| `ox_target` | Sim | Alvos no NPC, no caminhão e no ponto de entrega (ou um recurso compatível, como `mri_Qinteract`) |
+| `ox_inventory` | Sim | Pagamento via `AddItem` no servidor |
+| `mri_Qcarkeys` | Não | Se estiver iniciado, o líder recebe a chave do caminhão |
 
-O recurso não usa framework (QBox/ESX) nem banco de dados.
+Requer **OneSync** (o servidor valida a posição dos jogadores e do caminhão). Não usa banco de dados.
 
 ---
 
@@ -37,9 +39,7 @@ O recurso não usa framework (QBox/ESX) nem banco de dados.
    ensure ox_inventory
    ensure dom_trucking
    ```
-3. Garanta que o item definido em `Config.Reward.Reward` (padrão `money`) exista no `ox_inventory`. Com o padrão `money` não é necessária nenhuma configuração extra.
-
-Não há SQL para importar.
+3. Garanta que o item definido em `Config.Reward.Reward` (padrão `money`) exista no `ox_inventory`.
 
 ---
 
@@ -47,78 +47,90 @@ Não há SQL para importar.
 
 Todas as opções ficam em `config.lua`.
 
-| Campo | Tipo | Obrigatório | Descrição |
-|---|---|---|---|
-| `Config.NPC.Location` | vec3 | Sim | Onde o NPC que entrega o job é criado |
-| `Config.NPC.Heading` | number | Sim | Rotação do NPC |
-| `Config.Truck.Location` | vec3 | Sim | Onde o caminhão (`boxville2`) é gerado ao aceitar o job |
-| `Config.Truck.Heading` | number | Sim | Rotação do caminhão |
-| `Config.DropOff.Location` | tabela de vec3 | Sim | Lojas de entrega. Uma é sorteada por job; o centro da zona de detecção |
-| `Config.DropOff.TargetPoint` | tabela de vec3 | Sim | Ponto exato de largar a caixa em cada loja. O índice **deve** corresponder ao mesmo índice de `Location` |
-| `Config.DropOff.BoxesMin` | number | Sim | Mínimo de caixas sorteadas por entrega |
-| `Config.DropOff.BoxesMax` | number | Sim | Máximo de caixas sorteadas por entrega |
-| `Config.Reward.Reward` | string | Sim | Nome do item do `ox_inventory` pago ao final |
-| `Config.Reward.AmountMin` | number | Sim | Quantidade mínima paga (sorteada) |
-| `Config.Reward.AmountMax` | number | Sim | Quantidade máxima paga (sorteada) |
-| `Config.Notification.InJob` | tabela `lib.notify` | Sim | Aviso ao tentar pegar um job já em andamento |
-| `Config.Notification.HasBox` | tabela `lib.notify` | Sim | Aviso ao tentar pegar uma caixa já estando com uma |
-| `Config.Notification.NoBox` | tabela `lib.notify` | Sim | Aviso ao tentar largar sem estar com caixa |
-| `Config.Notification.ReturnTruck` | tabela `lib.notify` | Sim | Aviso quando todas as caixas foram entregues |
-| `Config.Notification.CompletedJob` | tabela `lib.notify` | Sim | Aviso ao devolver o caminhão e receber o pagamento |
+### Geral
 
-Cada tabela de `Config.Notification` aceita os campos do `lib.notify`: `title`, `description`, `type` e `position`.
+| Campo | Descrição |
+|---|---|
+| `Config.Language` | Idioma dos textos (`pt-br` ou `en`, arquivos em `locales/`) |
+| `Config.Debug` | Mostra no console por que o caminhão ou uma caixa foram recusados |
 
-### Adicionar uma nova loja
+### NPC, caminhão e caixa
 
-Adicione a coordenada da zona em `Config.DropOff.Location` e o ponto de largar caixa em `Config.DropOff.TargetPoint`, **na mesma posição da lista**:
+| Campo | Descrição |
+|---|---|
+| `Config.NPC.Model` / `Location` / `Heading` | Ped que gerencia a equipe |
+| `Config.NPC.Zone` | Área (`Coords`, `Size`, `Rotation`) em que o NPC é criado/removido |
+| `Config.Truck.Model` / `Location` / `Heading` | Caminhão gerado para o líder ao iniciar a rota |
+| `Config.Box.Model` | Prop da caixa carregada |
 
-```lua
-Config.DropOff = {
-    Location = {
-        vec3(376.299, 322.467, 103.437),   -- loja 1
-        vec3(1159.387, -325.542, 69.205),  -- loja 2
-    },
-    TargetPoint = {
-        vec3(375.514, 334.839, 103.566),   -- ponto de largar da loja 1
-        vec3(1163.135, -313.367, 69.205),  -- ponto de largar da loja 2
-    },
-    ...
-}
-```
+### Entregas
+
+| Campo | Descrição |
+|---|---|
+| `Config.DropOff.Points` | Lista de pontos de entrega (`vec3`). A caixa é entregue exatamente nesse ponto |
+| `Config.DropOff.ZoneRadius` | Raio em volta do ponto que conta como "chegou na loja" e libera pegar caixa no caminhão |
+| `Config.DropOff.BoxesMin` / `BoxesMax` | Caixas sorteadas por entrega |
+| `Config.DropOff.RoutesMin` / `RoutesMax` | Entregas sorteadas por rota (limitado ao número de pontos) |
+
+Para adicionar uma loja basta incluir mais um `vec3` em `Config.DropOff.Points`.
+
+### Equipe e pagamento
+
+| Campo | Descrição |
+|---|---|
+| `Config.Group.MaxMembers` | Máximo de jogadores por equipe |
+| `Config.Group.BoxesMultiplierPerExtraPlayer` | Aumento de caixas por jogador extra (0.30 = +30%) |
+| `Config.Group.RoutesPerExtraPlayer` | Entregas extras por jogador extra (arredondado para cima) |
+| `Config.Group.PayMultiplierPerExtraPlayer` | Aumento do pagamento por jogador extra |
+| `Config.Reward.Reward` | Item do `ox_inventory` pago a cada membro |
+| `Config.Reward.AmountMin` / `AmountMax` | Valor base sorteado |
+
+### Interface
+
+| Campo | Descrição |
+|---|---|
+| `Config.Notify.Position` / `Duration` | Posição e duração das notificações |
+| `Config.Hud.Enabled` / `Position` | HUD fixo (`lib.showTextUI`) com o progresso da rota |
+
+### Segurança
+
+| Campo | Descrição |
+|---|---|
+| `Config.Security.ActionCooldown` | Tempo mínimo (ms) entre pegar/entregar caixas |
+| `Config.Security.GrabDistance` | Distância máxima do jogador até o caminhão para pegar caixa |
+| `Config.Security.StoreDistance` | Distância máxima do jogador até a loja para pegar caixa (mantenha maior que `ZoneRadius`) |
+| `Config.Security.DropDistance` | Distância máxima até o ponto de entrega |
+| `Config.Security.ReturnDistance` | Distância máxima do caminhão e do líder até o NPC para finalizar |
+| `Config.Security.SpawnDistance` | Distância máxima do caminhão registrado até o ponto de spawn |
 
 ---
 
 ## Fluxo do job
 
-1. Ao entrar na zona do NPC (fixa em `vec3(65.692, 117.731, 79.159)` no `client.lua`), o ped `s_m_m_postal_02` é criado em `Config.NPC.Location`.
-2. Alvo **Get a job** no NPC: gera o caminhão `boxville2` em `Config.Truck.Location`, sorteia uma loja de `Config.DropOff.Location` e cria a rota no GPS.
-3. Ao chegar na loja, o blip da rota some e são criados dois alvos: **Grab Box** na porta traseira direita do caminhão (bone `door_dside_r`) e **Dropoff Box** no `TargetPoint` da loja.
-4. Cada caixa é uma prop `prop_cs_cardbox_01` anexada ao ped, com a animação `anim@heists@box_carry@`. O número de caixas é sorteado entre `BoxesMin` e `BoxesMax`.
-5. Entregue todas as caixas e o GPS cria a rota de volta para o NPC.
-6. Alvo **Return Truck** no caminhão: deleta o veículo, dispara `dom_trucking:Reward` e o servidor credita entre `AmountMin` e `AmountMax` do item de recompensa.
+1. No NPC, um jogador escolhe **Criar equipe** e vira líder. O HUD mostra o ID dele.
+2. Os outros escolhem **Entrar em equipe** e digitam o **ID do líder**.
+3. O líder escolhe **Iniciar rota**. O servidor sorteia todas as lojas da rota de uma vez, sem repetir, e o caminhão é gerado.
+4. O GPS marca a primeira loja. Ao chegar no raio da loja, qualquer membro pode **Pegar caixa** nas portas traseiras do caminhão e **Entregar caixa** no ponto da loja.
+5. Ao entregar todas as caixas, a próxima loja da sequência é marcada. O HUD mostra `Caixas x/y | Entrega x/y`.
+6. Ao concluir a última entrega, o GPS marca o NPC. O líder leva o caminhão e escolhe **Devolver caminhão**. Todos os membros recebem o pagamento.
+
+Se o líder sair da equipe ou do servidor, a equipe é encerrada e o caminhão é removido.
 
 ---
 
-## Entrypoints para outros recursos
+## Segurança
 
-### Evento de servidor `dom_trucking:Reward`
+Toda a lógica que vale dinheiro roda no servidor:
 
-Disparado pelo cliente ao devolver o caminhão. Credita ao `source` uma quantidade aleatória entre `Config.Reward.AmountMin` e `Config.Reward.AmountMax` do item `Config.Reward.Reward`.
+- Pegar e entregar caixa são `lib.callback` validados (distância do caminhão, da loja e do ponto de entrega, se o jogador está carregando caixa, limite de caixas da entrega e cooldown).
+- O caminhão registrado precisa ter o modelo configurado e ter surgido no ponto de spawn.
+- O pagamento exige rota concluída, caminhão e líder perto do NPC, e só acontece uma vez.
 
-```lua
-TriggerServerEvent('dom_trucking:Reward')
-```
+---
 
-> O evento não valida se o job foi realmente concluído.
+## Idiomas
 
-### Eventos de cliente
-
-| Evento | Efeito |
-|---|---|
-| `dom_trucking:removeZone` | Remove a zona de detecção da loja atual |
-| `dom_trucking:removeStoreZones` | Remove os alvos de caixa e marca o job como concluído, criando a rota de volta ao NPC |
-
-Ambos são internos do fluxo do job e não foram feitos para uso externo.
+Os textos ficam em `locales/<idioma>.json` e são carregados por `shared/language.lua` conforme `Config.Language`. Para traduzir, copie `locales/en.json` com outro nome e ajuste `Config.Language`.
 
 ---
 
@@ -126,9 +138,10 @@ Ambos são internos do fluxo do job e não foram feitos para uso externo.
 
 ```
 dom_trucking/
-├── client.lua       — zonas, NPC, caminhão, alvos de pegar/largar caixa e devolução
-├── server.lua       — evento dom_trucking:Reward, pagamento via ox_inventory
-├── config.lua       — coordenadas, quantidade de caixas, recompensa e notificações
-├── README.md
+├── client.lua          — NPC, zonas, HUD, caminhão do líder, pegar/entregar caixa
+├── server.lua          — equipes, sorteio da rota, validações e pagamento
+├── config.lua          — todas as opções
+├── shared/language.lua — carregamento dos locales
+├── locales/            — textos (pt-br, en)
 └── fxmanifest.lua
 ```
